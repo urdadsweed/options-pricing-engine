@@ -177,15 +177,22 @@ if use_live_data:
     if st.sidebar.checkbox("Show HV Chart"):
         try:
             stock = yf.Ticker(ticker_symbol)
-            data = stock.history(period='90d')
-            if len(data) > 30:
+            data = stock.history(period='6mo', interval='1d')
+            if data is None or data.empty or len(data) <= 30:
+                st.sidebar.warning("Not enough data for HV (need > 30 daily bars).")
+            else:
                 # Calculate rolling 30-day volatility
                 returns = np.log(data['Close'] / data['Close'].shift(1))
                 rolling_vol = returns.rolling(window=30).std() * np.sqrt(252) * 100
                 
                 fig, ax = plt.subplots(figsize=(10, 4))
                 ax.plot(rolling_vol.index, rolling_vol, 'b-', linewidth=1.5)
-                ax.axhline(sigma*100, color='red', linestyle='--', label=f'Current Input: {sigma*100:.1f}%')
+                
+                # draw current input volatility if available
+                sigma_line = st.session_state.get("sigma_for_line")
+                if sigma_line is not None:
+                    ax.axhline(sigma_line*100, color='red', linestyle='--', label=f'Current Input: {sigma_line*100:.1f}%')
+                
                 ax.set_xlabel('Date')
                 ax.set_ylabel('Volatility (%)')
                 ax.set_title('30-Day Historical Volatility')
@@ -220,6 +227,8 @@ T = days / 365
 
 r = st.sidebar.slider("Risk-Free Rate (%)", 0.0, 15.0, 7.0, 0.5) / 100
 sigma = st.sidebar.slider("Volatility (%)", 1.0, 100.0, 18.0, 1.0) / 100
+# store for HV chart (so it can read before this block executes again)
+st.session_state["sigma_for_line"] = sigma
 
 st.sidebar.markdown("---")
 st.sidebar.info(f"Time to expiry: {T:.4f} years ({days} days)")
