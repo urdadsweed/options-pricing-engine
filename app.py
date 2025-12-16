@@ -105,6 +105,44 @@ put_purchase = st.sidebar.number_input(
     help="Leave as 0 to skip P/L analysis"
 )
 
+st.sidebar.markdown("---")
+st.sidebar.header("🎛️ Heatmap Parameters")
+st.sidebar.write("Customize the scenario analysis ranges")
+
+min_spot = st.sidebar.number_input(
+    "Min Spot Price",
+    min_value=1.0,
+    value=S * 0.85,
+    step=100.0,
+    help="Minimum spot price for heatmap"
+)
+
+max_spot = st.sidebar.number_input(
+    "Max Spot Price",
+    min_value=min_spot + 100,
+    value=S * 1.15,
+    step=100.0,
+    help="Maximum spot price for heatmap"
+)
+
+min_vol = st.sidebar.slider(
+    "Min Volatility (%)",
+    min_value=1.0,
+    max_value=sigma * 100,
+    value=sigma * 50,
+    step=1.0,
+    help="Minimum volatility for heatmap"
+) / 100
+
+max_vol = st.sidebar.slider(
+    "Max Volatility (%)",
+    min_value=sigma * 100,
+    max_value=100.0,
+    value=min(sigma * 150, 100.0),
+    step=1.0,
+    help="Maximum volatility for heatmap"
+) / 100
+
 # Calculate prices and greeks
 try:
     bs = BlackScholes(S, K, T, r, sigma)
@@ -216,70 +254,120 @@ try:
         st.subheader("🔥 P/L Heatmap - Scenario Analysis")
         st.write("See how your profit/loss changes across different spot prices and volatilities")
         
-        # Create heatmap data
-        spot_range = np.linspace(S * 0.85, S * 1.15, 20)
-        vol_range = np.linspace(sigma * 0.5, sigma * 1.5, 20)
+        # Create heatmap data using custom parameters
+        spot_range = np.linspace(min_spot, max_spot, 20)
+        vol_range = np.linspace(min_vol, max_vol, 20)
         
-        # Choose which option to display
-        option_choice = st.radio("Select Option:", ["Call", "Put"], horizontal=True)
-        
-        # Calculate P/L for each combination
-        pl_matrix = np.zeros((len(vol_range), len(spot_range)))
+        # Calculate P/L for Call and Put
+        call_pl_matrix = np.zeros((len(vol_range), len(spot_range)))
+        put_pl_matrix = np.zeros((len(vol_range), len(spot_range)))
         
         for i, vol in enumerate(vol_range):
             for j, spot in enumerate(spot_range):
                 try:
                     bs_temp = BlackScholes(spot, K, T, r, vol)
-                    if option_choice == "Call":
-                        theoretical_price = bs_temp.call_price()
-                        pl_matrix[i, j] = theoretical_price - call_purchase if call_purchase > 0 else 0
-                    else:
-                        theoretical_price = bs_temp.put_price()
-                        pl_matrix[i, j] = theoretical_price - put_purchase if put_purchase > 0 else 0
+                    call_theoretical = bs_temp.call_price()
+                    put_theoretical = bs_temp.put_price()
+                    call_pl_matrix[i, j] = call_theoretical - call_purchase if call_purchase > 0 else 0
+                    put_pl_matrix[i, j] = put_theoretical - put_purchase if put_purchase > 0 else 0
                 except:
-                    pl_matrix[i, j] = 0
+                    call_pl_matrix[i, j] = 0
+                    put_pl_matrix[i, j] = 0
         
-        # Create heatmap
-        fig, ax = plt.subplots(figsize=(12, 8))
+        # Create side-by-side heatmaps
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
         
-        # Use RdYlGn colormap (Red-Yellow-Green)
-        im = ax.imshow(pl_matrix, cmap='RdYlGn', aspect='auto', 
-                      extent=[spot_range[0], spot_range[-1], vol_range[0]*100, vol_range[-1]*100],
-                      origin='lower')
+        # Call Option Heatmap
+        if call_purchase > 0:
+            im1 = ax1.imshow(call_pl_matrix, cmap='RdYlGn', aspect='auto', 
+                          extent=[spot_range[0], spot_range[-1], vol_range[0]*100, vol_range[-1]*100],
+                          origin='lower')
+            
+            cbar1 = plt.colorbar(im1, ax=ax1)
+            cbar1.set_label('P/L (₹)', rotation=270, labelpad=20, fontsize=11)
+            
+            # Add values in cells (sample every 4th cell to avoid overcrowding)
+            for i in range(0, len(vol_range), 4):
+                for j in range(0, len(spot_range), 4):
+                    text_color = 'white' if abs(call_pl_matrix[i, j]) > np.max(np.abs(call_pl_matrix)) * 0.5 else 'black'
+                    ax1.text(spot_range[j], vol_range[i]*100, f'{call_pl_matrix[i, j]:.1f}',
+                            ha='center', va='center', color=text_color, fontsize=8, fontweight='bold')
+            
+            # Add breakeven line
+            contour1 = ax1.contour(spot_range, vol_range*100, call_pl_matrix, levels=[0], colors='black', linewidths=2)
+            ax1.clabel(contour1, inline=True, fontsize=9, fmt='Breakeven')
+            
+            ax1.set_xlabel('Spot Price (₹)', fontsize=12, fontweight='bold')
+            ax1.set_ylabel('Volatility (%)', fontsize=12, fontweight='bold')
+            ax1.set_title(f'CALL Option P/L\nPurchase: ₹{call_purchase:.2f} | Current: ₹{call_price:.2f}', 
+                        fontsize=13, fontweight='bold', pad=15)
+            
+            ax1.plot(S, sigma*100, 'b*', markersize=20, label='Current Position', markeredgecolor='white', markeredgewidth=2)
+            ax1.legend(fontsize=10)
+            ax1.grid(True, alpha=0.3, linestyle='--')
+        else:
+            ax1.text(0.5, 0.5, 'No Call Position\nEnter Purchase Price', 
+                    ha='center', va='center', transform=ax1.transAxes, fontsize=14, color='gray')
+            ax1.set_title('CALL Option P/L', fontsize=13, fontweight='bold')
         
-        # Add colorbar
-        cbar = plt.colorbar(im, ax=ax)
-        cbar.set_label('P/L (₹)', rotation=270, labelpad=20, fontsize=11)
-        
-        # Add contour lines for zero P/L
-        contour = ax.contour(spot_range, vol_range*100, pl_matrix, levels=[0], colors='black', linewidths=2)
-        ax.clabel(contour, inline=True, fontsize=10, fmt='Breakeven')
-        
-        # Labels and title
-        ax.set_xlabel('Spot Price (₹)', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Volatility (%)', fontsize=12, fontweight='bold')
-        ax.set_title(f'{option_choice} Option P/L Heatmap\nGreen = Profit | Red = Loss', 
-                    fontsize=14, fontweight='bold', pad=15)
-        
-        # Add current position marker
-        ax.plot(S, sigma*100, 'b*', markersize=20, label='Current Position', markeredgecolor='white', markeredgewidth=2)
-        ax.legend(fontsize=11)
-        
-        # Grid
-        ax.grid(True, alpha=0.3, linestyle='--')
+        # Put Option Heatmap
+        if put_purchase > 0:
+            im2 = ax2.imshow(put_pl_matrix, cmap='RdYlGn', aspect='auto', 
+                          extent=[spot_range[0], spot_range[-1], vol_range[0]*100, vol_range[-1]*100],
+                          origin='lower')
+            
+            cbar2 = plt.colorbar(im2, ax=ax2)
+            cbar2.set_label('P/L (₹)', rotation=270, labelpad=20, fontsize=11)
+            
+            # Add values in cells (sample every 4th cell)
+            for i in range(0, len(vol_range), 4):
+                for j in range(0, len(spot_range), 4):
+                    text_color = 'white' if abs(put_pl_matrix[i, j]) > np.max(np.abs(put_pl_matrix)) * 0.5 else 'black'
+                    ax2.text(spot_range[j], vol_range[i]*100, f'{put_pl_matrix[i, j]:.1f}',
+                            ha='center', va='center', color=text_color, fontsize=8, fontweight='bold')
+            
+            # Add breakeven line
+            contour2 = ax2.contour(spot_range, vol_range*100, put_pl_matrix, levels=[0], colors='black', linewidths=2)
+            ax2.clabel(contour2, inline=True, fontsize=9, fmt='Breakeven')
+            
+            ax2.set_xlabel('Spot Price (₹)', fontsize=12, fontweight='bold')
+            ax2.set_ylabel('Volatility (%)', fontsize=12, fontweight='bold')
+            ax2.set_title(f'PUT Option P/L\nPurchase: ₹{put_purchase:.2f} | Current: ₹{put_price:.2f}', 
+                        fontsize=13, fontweight='bold', pad=15)
+            
+            ax2.plot(S, sigma*100, 'b*', markersize=20, label='Current Position', markeredgecolor='white', markeredgewidth=2)
+            ax2.legend(fontsize=10)
+            ax2.grid(True, alpha=0.3, linestyle='--')
+        else:
+            ax2.text(0.5, 0.5, 'No Put Position\nEnter Purchase Price', 
+                    ha='center', va='center', transform=ax2.transAxes, fontsize=14, color='gray')
+            ax2.set_title('PUT Option P/L', fontsize=13, fontweight='bold')
         
         plt.tight_layout()
         st.pyplot(fig)
         
         # Summary stats
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Max Profit", f"₹{np.max(pl_matrix):.2f}")
+            if call_purchase > 0:
+                st.metric("Call Max Profit", f"₹{np.max(call_pl_matrix):.2f}")
+            else:
+                st.metric("Call Max Profit", "N/A")
         with col2:
-            st.metric("Max Loss", f"₹{np.min(pl_matrix):.2f}")
+            if call_purchase > 0:
+                st.metric("Call Max Loss", f"₹{np.min(call_pl_matrix):.2f}")
+            else:
+                st.metric("Call Max Loss", "N/A")
         with col3:
-            current_pl = call_price - call_purchase if option_choice == "Call" else put_price - put_purchase
-            st.metric("Current P/L", f"₹{current_pl:.2f}")
+            if put_purchase > 0:
+                st.metric("Put Max Profit", f"₹{np.max(put_pl_matrix):.2f}")
+            else:
+                st.metric("Put Max Profit", "N/A")
+        with col4:
+            if put_purchase > 0:
+                st.metric("Put Max Loss", f"₹{np.min(put_pl_matrix):.2f}")
+            else:
+                st.metric("Put Max Loss", "N/A")
         
         with st.expander("📊 How to Read This Heatmap"):
             st.write("""
